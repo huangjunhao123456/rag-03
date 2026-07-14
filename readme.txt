@@ -55,4 +55,3 @@ RAG常见的面试题
     chunk_overlap:10%~20%
 
 3、相似度检索、MMR检索
-    
