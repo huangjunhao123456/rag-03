@@ -1,11 +1,14 @@
 import asyncio
 import torch
 from langchain_huggingface import HuggingFaceEmbeddings
-# from retrieve import rephrase_retrieve, get_rag_chain, get_llm, get_retriever  # 单查询的
-from retrieve_tuning_before_1 import rephrase_retrieve, get_rag_chain, get_llm, get_retriever  # 多查询的
+from retrieve import rephrase_retrieve, get_rag_chain, get_llm, get_retriever
 from datasets import Dataset
-from ragas.metrics import ContextRelevance, answer_relevancy, faithfulness, ResponseGroundedness
+from ragas.metrics.collections import ContextRelevance, AnswerRelevancy, Faithfulness, ResponseGroundedness
 from ragas import evaluate
+from ragas.llms.base import llm_factory
+from openai import AsyncOpenAI
+from ragas.embeddings.base import embedding_factory
+
 # 存储对话历史
 chat_history = []
 # 将需要评估的数据存储起来
@@ -22,6 +25,8 @@ embedding_model = HuggingFaceEmbeddings(
 
 # 2、初始化 LLM
 llm = get_llm()
+client = AsyncOpenAI()
+eval_llm = llm_factory(client=client, model="qwen-plus")
 
 """
 ragas进行评估：
@@ -38,8 +43,7 @@ async def invoke_rag(query,conversation_id,chat_history):
     # 1、获取检索器
     retriever=get_retriever(k=20,embedding_model=embedding_model)
     # 2、执行重述、检索
-    # retrieve_result= rephrase_retrieve(input,llm,retriever)  #普通检索
-    retrieve_result = rephrase_retrieve(input, llm, retriever, 4)  #多查询
+    retrieve_result= rephrase_retrieve(input,llm,retriever)
     # 3、获取RAG链
     rag_chain = get_rag_chain(retrieve_result,llm)
     # 4、异步执行RAG链，流式输出
@@ -75,13 +79,13 @@ def rag_evaluate(datas):
         "retrieved_contexts": [d["contexts"] for d in datas],  # 检索到的上下文
     }
     dataset = Dataset.from_dict(ragas_data)
-
+    embeddings = embedding_factory("openai", model="text-embedding-ada-002", client=client)
     # 2.定义评估指标
     metrics = [
-        ContextRelevance(), #上下文的相关性
-        answer_relevancy,  # 回复的相关性
-        faithfulness,  # 可信度
-        ResponseGroundedness() # 响应的真实性
+        ContextRelevance(eval_llm), #上下文的相关性
+        AnswerRelevancy(eval_llm,embeddings),  # 回复的相关性
+        Faithfulness(eval_llm),  # 可信度
+        ResponseGroundedness(eval_llm) # 响应的真实性
     ]
 
     # 3.执行评估
@@ -98,8 +102,7 @@ def rag_evaluate(datas):
 
 if __name__ == '__main__':
     async def main():
-        #query_list = ["中国科学院国家天文台2023年部门预算总额是多少", "该预算中，科学技术支出具体是多少？"]
-        query_list = ["不动产或者动产被人占有怎么办", "那要是被损毁了呢"]
+        query_list = ["中国科学院国家天文台2023年部门预算总额是多少", "该预算中，科学技术支出具体是多少？"]
         for query in query_list: 
             print(f"===== 查询: {query} =====")
             async for chunk in invoke_rag(query,1,chat_history):
