@@ -1,32 +1,41 @@
 import asyncio
 import torch
-from datasets import Dataset
 from langchain_huggingface import HuggingFaceEmbeddings
-from ragas import evaluate
-from ragas.metrics import ContextRelevance, answer_relevancy, faithfulness,ResponseGroundedness
 from retrieve import rephrase_retrieve, get_rag_chain, get_llm, get_retriever
-
+from datasets import Dataset
+from ragas.metrics import ContextRelevance, answer_relevancy, faithfulness, ResponseGroundedness
+from ragas import evaluate
 # 存储对话历史
 chat_history = []
-# 存储评估用的检索结果
-retrieve_history=[]
+# 将需要评估的数据存储起来
+retrieve_history = []
 
 # 1、初始化Embedding模型
 embedding_model = HuggingFaceEmbeddings(
-    model_name="./bge-base-zh-v1.5",
+    model_name="./model/bge-base-zh-v1.5",
     model_kwargs={"device": "cuda" if torch.cuda.is_available() else "cpu"},
     encode_kwargs={
         "normalize_embeddings": True
-    }, # 输出归一化向量，更适合余弦相似度计算
+    },  # 输出归一化向量，更适合余弦相似度计算
 )
+
 # 2、初始化 LLM
 llm = get_llm()
+
+"""
+ragas进行评估：
+ - 用户问题：query
+ - 上下文:retrieve_result
+ - 模型回复:answer
+"""
 async def invoke_rag(query,conversation_id,chat_history):
+
     answer = ""
+
     input={"query":query,"history":chat_history}
+
     # 1、获取检索器
     retriever=get_retriever(k=20,embedding_model=embedding_model)
-    # bm25_retriever = get_bm25_retriever() #配合混合检索 hy
     # 2、执行重述、检索
     retrieve_result= rephrase_retrieve(input,llm,retriever)
     # 3、获取RAG链
@@ -34,7 +43,8 @@ async def invoke_rag(query,conversation_id,chat_history):
     # 4、异步执行RAG链，流式输出
     async for chunk in rag_chain.astream(input):
         answer += chunk
-        yield chunk
+        yield chunk # 将大模型生成的内容逐块(chunk)地返回给调用者，而不是等待整个回答完成后一次性返回
+
     # 5、更新对话历史，添加用户查询和AI回答
     chat_history.append(
         {"role": "user", "content": query, "conversation_id": conversation_id}
@@ -42,66 +52,66 @@ async def invoke_rag(query,conversation_id,chat_history):
     chat_history.append(
         {"role": "ai", "content": answer, "conversation_id": conversation_id}
     )
-    # 6、保存检索的结果，用于后续评估
+
+    # 存储数据，供后续进行评估
     retrieve_history.append({
         "query": query,
-        "answer": answer,
         "contexts": [
-            doc.page_content
-            for doc in retrieve_result
-        ]
+            doc.page_content for doc in retrieve_result
+        ],
+        "answer": answer
     })
-async def rag_evaluate(datas):
-    """
-    评估RAG模型性能
-    使用RAGAS框架评估RAG系统的各项指标
-    Args:
-        datas (list): 评估数据列表，包含查询、回答和上下文信息
-    Returns:
-        EvaluationResult: 评估结果对象
-    """
 
-    # 1、构建RAGAS评估数据集
+def rag_evaluate(datas):
+    """
+        使用RAGAS 对RAG进行评估
+    """
+    # 1.构建评估数据集
     ragas_data = {
-        "user_input": [d["query"] for d in datas], # 用户查询
-        "response": [d["answer"] for d in datas], # AI回答
-        "retrieved_contexts": [d["contexts"] for d in datas], # 检索到的上下文
+        "user_input": [d["query"] for d in datas],  # 用户查询
+        "response": [d["answer"] for d in datas],  # AI回答
+        "retrieved_contexts": [d["contexts"] for d in datas],  # 检索到的上下文
     }
     dataset = Dataset.from_dict(ragas_data)
-    # 2、定义评估指标
+
+    # 2.定义评估指标
     metrics = [
-        ContextRelevance(), # 上下文相关性
-        answer_relevancy, # 答案相关性
-        faithfulness, # 忠实度
-        ResponseGroundedness(), # 响应真实性
+        ContextRelevance(), #上下文的相关性
+        answer_relevancy,  # 回复的相关性
+        faithfulness,  # 可信度
+        ResponseGroundedness() # 响应的真实性
     ]
-    # 3、执行评估
+
+    # 3.执行评估
     result = evaluate(
-        dataset=dataset,
-        metrics=metrics,
-        llm=llm, # 使用的大语言模型
-        embeddings=embedding_model, # 使用的嵌入模型
-        raise_exceptions=False, # 允许在评估失败时返回 NaN 而不是抛出异常
+        dataset, 
+        metrics,
+        llm,
+        embeddings=embedding_model
     )
-    # 4、清空保存的检索结果
+
     datas.clear()
     return result
+
+
 if __name__ == '__main__':
     async def main():
-        query_list = ["不动产或者动产被人占有怎么办", "那要是被损毁了呢"]
-        for query in query_list:
+        query_list = ["中国科学院国家天文台2023年部门预算总额是多少", "该预算中，科学技术支出具体是多少？"]
+        for query in query_list: 
             print(f"===== 查询: {query} =====")
             async for chunk in invoke_rag(query,1,chat_history):
                 print(chunk, end="", flush=True)
-        # 评估模型性能
-        evaluate_res = await rag_evaluate(retrieve_history)
-        print(evaluate_res)
+
+        ############################
+        print("\n\n RAG 评估结果如下：-------------------------------------")
+        eva_res = rag_evaluate(retrieve_history)  
+
         # 输出评估结果的关键指标
         import pandas as pd
         pd.set_option('display.max_columns', None)
         pd.set_option('display.width', None)
         print(
-            evaluate_res.to_pandas()[
+            eva_res.to_pandas()[
                 [
                     "nv_context_relevance",
                     "answer_relevancy",
@@ -110,4 +120,6 @@ if __name__ == '__main__':
                 ]
             ]
         )
+
+
     asyncio.run(main())
