@@ -1,8 +1,9 @@
 import asyncio
 import torch
 from langchain_huggingface import HuggingFaceEmbeddings
-#from retrieve import rephrase_retrieve, get_rag_chain, get_llm, get_retriever # 单查询
-from retrieve_tuning_before_1 import rephrase_retrieve, get_rag_chain, get_llm, get_retriever # 多查询
+#from retrieve import rephrase_retrieve, get_rag_chain, get_llm, get_retriever
+#from retrieve_tuning_before_1 import rephrase_retrieve, get_rag_chain, get_llm, get_retriever
+from retrieve_tuning_before_2 import rephrase_retrieve, get_rag_chain, get_llm, get_retriever
 from datasets import Dataset
 from ragas.metrics import ContextRelevance, answer_relevancy, faithfulness, ResponseGroundedness
 from ragas import evaluate
@@ -41,7 +42,8 @@ async def invoke_rag(query,conversation_id,chat_history):
     
     # 2、执行重述、检索
     #retrieve_result= rephrase_retrieve(input,llm,retriever) #普通检索
-    retrieve_result = rephrase_retrieve(input, llm, retriever, 4) #多查询
+    #retrieve_result = rephrase_retrieve(input, llm, retriever, 4) #多查询
+    retrieve_result = rephrase_retrieve(input, llm, retriever) # 假设性文档：HyDE
     # 3、获取RAG链
     rag_chain = get_rag_chain(retrieve_result,llm)
     # 4、异步执行RAG链，流式输出
