@@ -1,11 +1,12 @@
 import asyncio
 import torch
 from langchain_huggingface import HuggingFaceEmbeddings
-# from retrieve import rephrase_retrieve, get_rag_chain, get_llm, get_retriever  # 单查询的
-from retrieve_tuning_before_1 import rephrase_retrieve, get_rag_chain, get_llm, get_retriever  # 多查询的
+#from retrieve import rephrase_retrieve, get_rag_chain, get_llm, get_retriever # 单查询
+from retrieve_tuning_before_1 import rephrase_retrieve, get_rag_chain, get_llm, get_retriever # 多查询
 from datasets import Dataset
 from ragas.metrics import ContextRelevance, answer_relevancy, faithfulness, ResponseGroundedness
 from ragas import evaluate
+
 # 存储对话历史
 chat_history = []
 # 将需要评估的数据存储起来
@@ -37,9 +38,10 @@ async def invoke_rag(query,conversation_id,chat_history):
 
     # 1、获取检索器
     retriever=get_retriever(k=20,embedding_model=embedding_model)
+    
     # 2、执行重述、检索
-    # retrieve_result= rephrase_retrieve(input,llm,retriever)  #普通检索
-    retrieve_result = rephrase_retrieve(input, llm, retriever, 4)  #多查询
+    #retrieve_result= rephrase_retrieve(input,llm,retriever) #普通检索
+    retrieve_result = rephrase_retrieve(input, llm, retriever, 4) #多查询
     # 3、获取RAG链
     rag_chain = get_rag_chain(retrieve_result,llm)
     # 4、异步执行RAG链，流式输出
@@ -123,6 +125,5 @@ if __name__ == '__main__':
                 ]
             ]
         )
-
 
     asyncio.run(main())

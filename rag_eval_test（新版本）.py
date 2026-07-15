@@ -1,13 +1,14 @@
 import asyncio
 import torch
 from langchain_huggingface import HuggingFaceEmbeddings
-from retrieve import rephrase_retrieve, get_rag_chain, get_llm, get_retriever
-from datasets import Dataset
+#from retrieve import rephrase_retrieve, get_rag_chain, get_llm, get_retriever
+from retrieve_tuning_before_1 import rephrase_retrieve, get_rag_chain, get_llm, get_retriever
+
 from ragas.metrics.collections import ContextRelevance, AnswerRelevancy, Faithfulness, ResponseGroundedness
-from ragas import evaluate
 from ragas.llms.base import llm_factory
 from openai import AsyncOpenAI
-from ragas.embeddings.base import embedding_factory
+import pandas as pd
+from ragas.embeddings import HuggingFaceEmbeddings as RagasHuggingFaceEmbeddings
 
 # 存储对话历史
 chat_history = []
@@ -23,11 +24,16 @@ embedding_model = HuggingFaceEmbeddings(
     },  # 输出归一化向量，更适合余弦相似度计算
 )
 
+eval_embeddings = RagasHuggingFaceEmbeddings(
+        model="./model/bge-base-zh-v1.5",
+        device="cuda" if torch.cuda.is_available() else "cpu",
+        normalize_embeddings=True,
+)
+
 # 2、初始化 LLM
 llm = get_llm()
 client = AsyncOpenAI()
 eval_llm = llm_factory(client=client, model="qwen-plus")
-
 """
 ragas进行评估：
  - 用户问题：query
@@ -41,9 +47,11 @@ async def invoke_rag(query,conversation_id,chat_history):
     input={"query":query,"history":chat_history}
 
     # 1、获取检索器
-    retriever=get_retriever(k=20,embedding_model=embedding_model)
+    retriever=get_retriever(k=5,embedding_model=embedding_model)
     # 2、执行重述、检索
-    retrieve_result= rephrase_retrieve(input,llm,retriever)
+    #retrieve_result= rephrase_retrieve(input,llm,retriever)
+    retrieve_result = rephrase_retrieve(input, llm, retriever, 3) #多查询
+
     # 3、获取RAG链
     rag_chain = get_rag_chain(retrieve_result,llm)
     # 4、异步执行RAG链，流式输出
@@ -68,36 +76,61 @@ async def invoke_rag(query,conversation_id,chat_history):
         "answer": answer
     })
 
-def rag_evaluate(datas):
+async def rag_evaluate(datas):
     """
         使用RAGAS 对RAG进行评估
     """
-    # 1.构建评估数据集
-    ragas_data = {
-        "user_input": [d["query"] for d in datas],  # 用户查询
-        "response": [d["answer"] for d in datas],  # AI回答
-        "retrieved_contexts": [d["contexts"] for d in datas],  # 检索到的上下文
-    }
-    dataset = Dataset.from_dict(ragas_data)
-    embeddings = embedding_factory("openai", model="text-embedding-ada-002", client=client)
-    # 2.定义评估指标
-    metrics = [
-        ContextRelevance(eval_llm), #上下文的相关性
-        AnswerRelevancy(eval_llm,embeddings),  # 回复的相关性
-        Faithfulness(eval_llm),  # 可信度
-        ResponseGroundedness(eval_llm) # 响应的真实性
-    ]
+    
 
-    # 3.执行评估
-    result = evaluate(
-        dataset, 
-        metrics,
-        llm,
-        embeddings=embedding_model
-    )
+    metrics = {
+        "nv_context_relevance": ContextRelevance(llm=eval_llm),
+        "answer_relevancy": AnswerRelevancy(
+            llm=eval_llm,
+            embeddings=eval_embeddings,
+        ),
+        "faithfulness": Faithfulness(llm=eval_llm),
+        "nv_response_groundedness": ResponseGroundedness(llm=eval_llm),
+    }
+    
+    rows = []
+
+    for data in datas:
+        results = await asyncio.gather(
+            # 只评估：检索上下文是否与问题相关
+            metrics["nv_context_relevance"].ascore(
+                user_input=data["query"],
+                retrieved_contexts=data["contexts"],
+            ),
+
+            # 只评估：回答是否回答了问题
+            metrics["answer_relevancy"].ascore(
+                user_input=data["query"],
+                response=data["answer"],
+            ),
+
+            # 评估：回答中的事实能否被上下文支撑
+            metrics["faithfulness"].ascore(
+                user_input=data["query"],
+                response=data["answer"],
+                retrieved_contexts=data["contexts"],
+            ),
+
+            # 评估：回答是否由检索上下文支撑
+            metrics["nv_response_groundedness"].ascore(
+                response=data["answer"],
+                retrieved_contexts=data["contexts"],
+            ),
+        )
+
+        rows.append({
+            "nv_context_relevance": results[0].value,
+            "answer_relevancy": results[1].value,
+            "faithfulness": results[2].value,
+            "nv_response_groundedness": results[3].value,
+        })
 
     datas.clear()
-    return result
+    return pd.DataFrame(rows)
 
 
 if __name__ == '__main__':
@@ -110,22 +143,21 @@ if __name__ == '__main__':
 
         ############################
         print("\n\n RAG 评估结果如下：-------------------------------------")
-        eva_res = rag_evaluate(retrieve_history)  
+        eva_res = await rag_evaluate(retrieve_history)  
 
         # 输出评估结果的关键指标
         import pandas as pd
         pd.set_option('display.max_columns', None)
         pd.set_option('display.width', None)
         print(
-            eva_res.to_pandas()[
-                [
-                    "nv_context_relevance",
-                    "answer_relevancy",
-                    "faithfulness",
-                    "nv_response_groundedness",
-                ]
+        eva_res[
+            [
+                "nv_context_relevance",
+                "answer_relevancy",
+                "faithfulness",
+                "nv_response_groundedness",
             ]
-        )
-
+        ]
+    )
 
     asyncio.run(main())
