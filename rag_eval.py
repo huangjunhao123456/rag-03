@@ -2,10 +2,10 @@ import asyncio
 import torch
 from langchain_huggingface import HuggingFaceEmbeddings
 #from retrieve import rephrase_retrieve, get_rag_chain, get_llm, get_retriever
-#from retrieve_tuning_before_1 import rephrase_retrieve, get_rag_chain, get_llm, get_retriever
-#from retrieve_tuning_before_2 import rephrase_retrieve, get_rag_chain, get_llm, get_retriever
-#from retrieve_tuning_after_1 import rephrase_retrieve, get_rag_chain, get_llm, get_retriever
-#from retrieve_tuning_after_2 import rephrase_retrieve, get_rag_chain, get_llm, get_retriever
+# from retrieve_tuning_before_1 import rephrase_retrieve, get_rag_chain, get_llm, get_retriever
+# from retrieve_tuning_before_2 import rephrase_retrieve, get_rag_chain, get_llm, get_retriever
+# from retrieve_tuning_after_1 import rephrase_retrieve, get_rag_chain, get_llm, get_retriever
+# from retrieve_tuning_after_2 import rephrase_retrieve, get_rag_chain, get_llm, get_retriever
 from retrieve_tuning_hy import rephrase_retrieve, get_rag_chain, get_llm, get_retriever, get_bm25_retriever
 
 from datasets import Dataset
@@ -30,8 +30,8 @@ embedding_model = HuggingFaceEmbeddings(
 # 2、初始化 LLM
 llm = get_llm()
 
-#rerank_tokenizer = AutoTokenizer.from_pretrained("./model/bge-reranker-base")
-#rerank_model = AutoModelForSequenceClassification.from_pretrained("./model/bge-reranker-base")
+# rerank_tokenizer = AutoTokenizer.from_pretrained("./model/bge-reranker-base")
+# rerank_model = AutoModelForSequenceClassification.from_pretrained("./model/bge-reranker-base")
 """
 ragas进行评估：
  - 用户问题：query
@@ -50,10 +50,10 @@ async def invoke_rag(query,conversation_id,chat_history):
     
     # 2、执行重述、检索
     #retrieve_result= rephrase_retrieve(input,llm,retriever) #普通检索
-    #retrieve_result = rephrase_retrieve(input, llm, retriever, 4) #多查询
-    #retrieve_result = rephrase_retrieve(input, llm, retriever) # 假设性文档：HyDE
-    #retrieve_result = rephrase_retrieve(input, llm, retriever, 4) #多查询+RRF重排
-    #retrieve_result = rephrase_retrieve(input, llm, retriever,  rerank_tokenizer, rerank_model) #使用Reranker模型重排序
+    # retrieve_result = rephrase_retrieve(input, llm, retriever, 4) #多查询
+    # retrieve_result = rephrase_retrieve(input, llm, retriever) # 假设性文档：HyDE
+    # retrieve_result = rephrase_retrieve(input, llm, retriever, 4) #多查询+RRF重排
+    # retrieve_result = rephrase_retrieve(input, llm, retriever,  rerank_tokenizer, rerank_model) #使用Reranker模型重排序
     
     retrieve_result = rephrase_retrieve(input, llm, retriever, bm25_retriever) #多查询+RRF重排
 
@@ -115,8 +115,11 @@ def rag_evaluate(datas):
 
 if __name__ == '__main__':
     async def main():
-        #query_list = ["中国科学院国家天文台2023年部门预算总额是多少", "该预算中，科学技术支出具体是多少？"]
+        # query_list = ["中国科学院国家天文台2023年部门预算总额是多少", "该预算中，科学技术支出具体是多少？"]
         query_list = ["不动产或者动产被人占有怎么办", "那要是被损毁了呢"]
+        # query_list = ["因意外事件下落不明申请宣告死亡，需要满足多长时间？","什么情况下不受该时间限制"]
+        # query_list = ["未成年人的父母已经死亡或没有监护能力时，法定监护人按什么顺序担任？","监护人出现哪些情形时，人民法院可以根据申请撤销其监护人资格？"]
+        # query_list = ["2023 年国家天文台一般公共预算拨款收入为多少万元？", "占收入总计的比例是多少？？"]
         for query in query_list: 
             print(f"===== 查询: {query} =====")
             async for chunk in invoke_rag(query,1,chat_history):
